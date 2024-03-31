@@ -1,42 +1,21 @@
 mod model;
+mod service;
 
 use std::collections::HashMap;
 use std::iter::Map;
+use std::thread;
 use axum::Router;
 use axum::routing::get;
+use rand::random;
 use tokio::net::TcpListener;
 
 use model::spider::Spider;
 use model::spider::UserInfo;
 
-async fn test(uid: String)-> UserInfo {
-    let info_mapper = model::spider::Mapper::new(
-        "/api/container/getIndex".to_string(),
-        "GET".to_string(),
-        HashMap::from([
-            ("jumpfrom".to_string(), "weibocom".to_string()),
-            ("type".to_string(), "uid".to_string()),
-            ("value".to_string(), uid)
-        ]),
-        |text| {
-            let json: serde_json::Value = serde_json::from_str(&text).unwrap();
-            UserInfo::new(
-                json["data"]["userInfo"]["id"].as_u64().unwrap() as u32,
-                json["data"]["userInfo"]["screen_name"].as_str().unwrap().to_string(),
-                json["data"]["userInfo"]["gender"].as_str().unwrap().chars().next().unwrap(),
-                json["data"]["userInfo"]["description"].as_str().unwrap().to_string(),
-                json["data"]["userInfo"]["follow_count"].as_u64().unwrap() as u32,
-                json["data"]["userInfo"]["followers_count"].as_str().unwrap().to_string(),
-                json["data"]["userInfo"]["profile_url"].as_str().unwrap().to_string(),
-                json["data"]["userInfo"]["cover_image_phone"].as_str().unwrap().to_string(),
-                json["data"]["userInfo"]["avatar_hd"].as_str().unwrap().to_string(),
-            )
-        }
-    );
-    let mappers = HashMap::from([("info".to_string(), info_mapper)]);
-    let spider = Spider::new("https://m.weibo.cn".to_string(), mappers);
-    spider.get_user_info().await.expect("获取用户信息失败")
-}
+use service::spider::crawl_info;
+use crate::model::spider::SpiderResult;
+use crate::service::spider::crawl_block_blogs;
+
 
 #[tokio::main]
 async fn main() {
@@ -46,5 +25,29 @@ async fn main() {
     // // run our app with hyper, listening globally on port 3000
     // let listener = TcpListener::bind("0.0.0.0:3000").await.unwrap();
     // axum::serve(listener, app).await.unwrap();
-    println!("{:?}",test("2280813617".to_string()).await);
+
+    if let SpiderResult::UserInfo(info) = crawl_info("2280813617".to_string()).await {
+        // if let SpiderResult::BlogList(blogs, offset) = crawl_block_blogs("2280813617".to_string(), info.cid, "".to_string()).await{
+        //
+        // };
+        let mut offset = "".to_string();
+        loop {
+            let sleep_duration = std::time::Duration::from_secs(random::<u64>() % 5 + 2);
+
+            tokio::time::sleep(sleep_duration).await;
+            if let SpiderResult::BlogList(blogs, _offset) = crawl_block_blogs("2280813617".to_string(), info.cid.clone(), offset.clone()).await {
+                blogs.iter().for_each(|blog| {
+                    blog.pictures.iter().for_each(|picture| {
+                        let _ = picture.download("./pictures".to_string());
+                    });
+                });
+                offset = _offset;
+            } else {
+                break;
+            }
+            if offset.is_empty() {
+                break;
+            }
+        }
+    };
 }
